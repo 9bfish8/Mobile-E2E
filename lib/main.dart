@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'wifi_connector.dart';
 import 'wifi_qr.dart';
-
-const _afterConnectUrl = 'https://www.youtube.com';
 
 void main() => runApp(const MobileE2EApp());
 
@@ -34,10 +31,19 @@ class _HomePageState extends State<HomePage> {
   late final _connector = WifiConnector(_log);
   bool _running = false;
 
+  /// Machine-readable state read by the Appium suite in e2e/:
+  /// `IDLE`, `SCANNING`, `CONNECTING`, `CONNECTED:<ssid>`, `FAILED:<reason>`.
+  String _status = 'IDLE';
+
   void _log(String message) {
     final t = TimeOfDay.now().format(context);
     debugPrint('[E2E] $message');
     if (mounted) setState(() => _logs.add('$t  $message'));
+  }
+
+  void _setStatus(String status) {
+    debugPrint('[E2E] status=$status');
+    if (mounted) setState(() => _status = status);
   }
 
   Future<void> _runFlow() async {
@@ -45,29 +51,29 @@ class _HomePageState extends State<HomePage> {
       _running = true;
       _logs.clear();
     });
+    _setStatus('SCANNING');
     try {
       final cred = await Navigator.of(context).push<WifiCredential>(
         MaterialPageRoute(builder: (_) => const QrScanPage()),
       );
       if (cred == null) {
         _log('QR 스캔 취소');
+        _setStatus('FAILED:SCAN_CANCELLED');
         return;
       }
       _log('QR 인식: ${cred.ssid} / ${cred.security}');
 
+      _setStatus('CONNECTING');
       if (!await _connector.connect(cred)) {
         _log('❌ 와이파이 연결 실패');
+        _setStatus('FAILED:WIFI');
         return;
       }
-
-      _log('앱 실행: $_afterConnectUrl');
-      final launched = await launchUrl(
-        Uri.parse(_afterConnectUrl),
-        mode: LaunchMode.externalApplication,
-      );
-      _log(launched ? '✅ 완료' : '❌ 앱 실행 실패');
+      _log('✅ 완료');
+      _setStatus('CONNECTED:${cred.ssid}');
     } catch (e) {
       _log('❌ 오류: $e');
+      _setStatus('FAILED:ERROR');
     } finally {
       if (mounted) setState(() => _running = false);
     }
@@ -76,16 +82,43 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('QR → Wi-Fi → 앱 실행')),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _logs.length,
-        itemBuilder: (_, i) => Text(_logs[i]),
+      appBar: AppBar(title: const Text('QR → Wi-Fi 연결')),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // `identifier` is exposed as the Android resource-id, so Appium can
+          // find these with UiSelector().resourceId("status").
+          Semantics(
+            identifier: 'status',
+            container: true,
+            label: _status,
+            excludeSemantics: true,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                '상태: $_status',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _logs.length,
+              itemBuilder: (_, i) => Text(_logs[i]),
+            ),
+          ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _running ? null : _runFlow,
-        icon: const Icon(Icons.qr_code_scanner),
-        label: Text(_running ? '진행 중...' : 'QR 스캔 시작'),
+      floatingActionButton: Semantics(
+        identifier: 'btn_start',
+        container: true,
+        child: FloatingActionButton.extended(
+          onPressed: _running ? null : _runFlow,
+          icon: const Icon(Icons.qr_code_scanner),
+          label: Text(_running ? '진행 중...' : 'QR 스캔 시작'),
+        ),
       ),
     );
   }
