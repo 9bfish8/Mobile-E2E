@@ -45,3 +45,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Appium E2E (e2e/)
+e2e/.venv/
+e2e/.env
+e2e/artifacts/
+__pycache__/
+.pytest_cache/
